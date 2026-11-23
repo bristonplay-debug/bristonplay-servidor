@@ -417,7 +417,10 @@
   function viewImportar() {
     var pg = page("Importar do fornecedor");
     pg.innerHTML = '<div class="box"><p class="muted small" style="margin-top:0">Escolha um acesso do fornecedor. O painel baixa a lista dele e você marca quais categorias quer na sua lista. Itens já importados são atualizados (não duplicam).</p>' +
-      '<div class="bar"><select class="acc"><option value="">Carregando acessos…</option></select><button class="btn p go">Baixar lista do fornecedor</button></div><div class="st muted small"></div></div><div class="res"></div>';
+      '<div class="bar"><select class="acc"><option value="">Carregando acessos…</option></select><button class="btn p go">Baixar lista do fornecedor</button></div>' +
+      '<p class="muted small" style="margin:14px 0 6px"><b>Ou cole o link da lista completa M3U</b> que o fornecedor mandou (ex.: http://servidor:80/playlist/usuario/senha/m3u_plus ou …/get.php?username=…). O acesso dela é cadastrado sozinho.</p>' +
+      '<div class="bar"><input class="url" placeholder="Cole aqui o link da lista do fornecedor" style="flex:1;min-width:220px"><button class="btn p gourl">Ler este link</button></div>' +
+      '<div class="st muted small"></div></div><div class="res"></div>';
     api("accounts.list").then(function (r) {
       $(".acc", pg).innerHTML = r.rows.length ? r.rows.map(function (a) { return '<option value="' + a.id + '">' + esc((a.label ? a.label + " — " : "") + a.username + " @ " + a.server_url) + "</option>"; }).join("")
         : '<option value="">Cadastre um acesso primeiro</option>';
@@ -427,12 +430,31 @@
       var btn = $(".go", pg); btn.disabled = true; $(".st", pg).textContent = "Baixando a lista do fornecedor (pode levar alguns minutos)…"; $(".res", pg).innerHTML = "";
       api("provider.m3u", { account_id: +id }, true).then(function (r) { return r.text(); }).then(function (text) {
         btn.disabled = false;
+        gotList(text);
+      }).catch(function (e) { btn.disabled = false; $(".st", pg).textContent = ""; toast(e.message, true); });
+    });
+    $(".gourl", pg).addEventListener("click", function () {
+      var url = $(".url", pg).value.trim();
+      if (!/^https?:\/\//i.test(url)) return toast("Cole o link completo da lista (começando com http)", true);
+      var btn = $(".gourl", pg); btn.disabled = true; $(".st", pg).textContent = "Baixando a lista do link (pode levar alguns minutos)…"; $(".res", pg).innerHTML = "";
+      var info = null;
+      api("provider.url", { url: url }, true).then(function (r) {
+        try { info = JSON.parse(decodeURIComponent(r.headers.get("x-bp-info") || "")); } catch (e) { info = null; }
+        return r.text();
+      }).then(function (text) {
+        btn.disabled = false;
+        if (info && info.created) toast("Acesso " + info.username + " cadastrado em Acessos do fornecedor. Ajuste lá o número de conexões dele.");
+        gotList(text);
+      }).catch(function (e) { btn.disabled = false; $(".st", pg).textContent = ""; toast(e.message, true); });
+    });
+    function gotList(text) {
+      {
         var items = parseM3U(text);
         if (!items.length) { $(".st", pg).textContent = "A lista veio vazia ou num formato desconhecido."; return; }
         $(".st", pg).textContent = items.length + " itens encontrados.";
         showPicker(items);
-      }).catch(function (e) { btn.disabled = false; $(".st", pg).textContent = ""; toast(e.message, true); });
-    });
+      }
+    }
 
     function showPicker(items) {
       var groups = { live: {}, movie: {}, series: {} }, order = { live: [], movie: [], series: [] };
@@ -464,11 +486,14 @@
     }
 
     function runImport(sel, res) {
-      var cats = [], streams = [], seriesMap = {}, seriesList = [], eps = [];
+      var cats = [], streams = [], seriesMap = {}, seriesList = [], eps = [], seen = {};
       ["live", "movie", "series"].forEach(function (k) {
         sel[k].forEach(function (g, gi) {
           cats.push({ kind: k, name: g.name, ref: g.name, sort: gi, adult: ADULT_RE.test(g.name) });
           g.items.forEach(function (it) {
+            var key = k + "|" + it.psid;
+            if (seen[key]) return; // o mesmo item em duas categorias do fornecedor: fica só na primeira
+            seen[key] = 1;
             if (k !== "series") { streams.push({ kind: k, cat: g.name, name: it.name, logo: it.logo, epg: it.epg, psid: it.psid, ext: it.ext }); return; }
             var m = it.name.match(EP_RE) || it.name.match(EP2_RE);
             var show = m ? m[1].replace(/[\s._-]+$/, "").trim() : it.name, season = m ? +m[2] : 1, ep = m ? +m[3] : 1;
