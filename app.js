@@ -354,9 +354,17 @@
     }
     function edit(a) {
       a = a || { enabled: true, max_connections: 1 };
+      setTimeout(function () {
+        var su = $('.modal [name="server_url"]'); if (!su) return;
+        su.addEventListener("input", function () {
+          var L = parseLink(su.value); if (!L) return;
+          su.value = L.server; $('.modal [name="username"]').value = L.user; $('.modal [name="password"]').value = L.pass;
+          toast("Link lido: endereço, usuário e senha preenchidos");
+        });
+      }, 0);
       var m = modal(a.id ? "Editar acesso" : "Novo acesso",
         '<label>Nome (para você identificar)</label><input name="label" value="' + esc(a.label) + '">' +
-        '<label>Endereço do servidor do fornecedor</label><input name="server_url" placeholder="http://servidor.com:8080" value="' + esc(a.server_url) + '">' +
+        '<label>Endereço do servidor <b>ou cole o link completo da lista</b> (preenche usuário e senha sozinho)</label><input name="server_url" placeholder="http://servidor.com:80 ou o link da lista M3U" value="' + esc(a.server_url) + '">' +
         '<div class="grid2"><div><label>Usuário</label><input name="username" value="' + esc(a.username) + '"></div><div><label>Senha</label><input name="password" value="' + esc(a.password) + '"></div></div>' +
         '<div class="grid2"><div><label>Conexões (telas)</label><input name="max_connections" type="number" min="1" value="' + (a.max_connections || 1) + '"></div><div><label>Vence em (opcional)</label><input name="expires_at" type="date" value="' + (a.expires_at ? a.expires_at.slice(0, 10) : "") + '"></div></div>' +
         '<label>Observação</label><input name="notes" value="' + esc(a.notes) + '">' +
@@ -365,7 +373,8 @@
           return new Promise(function (ok) { confirmBox("Apagar acesso", "Os clientes que usam este acesso passam para outro livre na próxima vez que assistirem.", "Apagar", function () {
             return api("accounts.delete", { id: a.id }).then(function () { m.close(); load(); ok(true); }); }); });
         } }] : []).concat([{ label: "Cancelar" }, { label: "Salvar", primary: true, onClick: function (el) {
-          return api("accounts.save", { row: { id: a.id, label: val(el, "label"), server_url: val(el, "server_url"), username: val(el, "username"), password: val(el, "password"),
+          var L = parseLink(val(el, "server_url")), su = L ? L.server : val(el, "server_url"), us = val(el, "username") || (L ? L.user : ""), pw = val(el, "password") || (L ? L.pass : "");
+          return api("accounts.save", { row: { id: a.id, label: val(el, "label"), server_url: su, username: us, password: pw,
             max_connections: +val(el, "max_connections") || 1, expires_at: val(el, "expires_at") ? new Date(val(el, "expires_at") + "T23:59:00").toISOString() : null,
             notes: val(el, "notes"), enabled: val(el, "enabled") } }).then(function () { toast("Salvo"); load(); });
         } }]));
@@ -377,12 +386,25 @@
         '<div class="grid2"><div><label>Conexões por acesso</label><input name="max_connections" type="number" value="1" min="1"></div><div><label>Nome (opcional)</label><input name="label"></div></div>',
         [{ label: "Cancelar" }, { label: "Cadastrar", primary: true, onClick: function (el) {
           var url = val(el, "server_url"), text = $('[name="text"]', el).value;
+          text = text.split(/\r?\n/).map(function (ln) { var L = parseLink(ln.trim()); if (!L) return ln; if (!url) url = L.server; return L.user + " " + L.pass; }).join("\n");
           if (!url) { var mm = text.match(/(https?:\/\/[^/\s]+)\/get\.php/i); if (mm) url = mm[1]; }
           return api("accounts.bulk", { server_url: url, text: text, max_connections: +val(el, "max_connections") || 1, label: val(el, "label") })
             .then(function (r) { toast(r.added + " acesso(s) cadastrado(s)"); load(); });
         } }]);
     });
     load();
+  }
+
+  // lê um link de lista (…/playlist/usuario/senha/…, …/get/usuario/senha, get.php?username=…&password=…)
+  function parseLink(v) {
+    v = String(v || "").trim();
+    if (!/^https?:\/\/[^\s]+\/[^\s]+/i.test(v)) return null;
+    var u; try { u = new URL(v); } catch (e) { return null; }
+    var user = u.searchParams.get("username") || "", pass = u.searchParams.get("password") || "";
+    if (!user) { var m = u.pathname.match(/\/(?:playlist|get)\/([^/]+)\/([^/]+)(?:\/|$)/i); if (m) { user = decodeURIComponent(m[1]); pass = decodeURIComponent(m[2]); } }
+    if (!user || !pass) return null;
+    var server = u.protocol + "//" + u.hostname + (u.port ? ":" + u.port : "");
+    return { server: server, user: user, pass: pass };
   }
 
   // ============================================================ importar do fornecedor (admin)
