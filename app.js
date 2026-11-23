@@ -442,7 +442,9 @@
       '<div class="bar"><select class="acc"><option value="">Carregando acessos…</option></select><button class="btn p go">Baixar lista do fornecedor</button></div>' +
       '<p class="muted small" style="margin:14px 0 6px"><b>Ou cole o link da lista completa M3U</b> que o fornecedor mandou (ex.: http://servidor:80/playlist/usuario/senha/m3u_plus ou …/get.php?username=…). O acesso dela é cadastrado sozinho.</p>' +
       '<div class="bar"><input class="url" placeholder="Cole aqui o link da lista do fornecedor" style="flex:1;min-width:220px"><button class="btn p gourl">Ler este link</button></div>' +
-      '<div class="st muted small"></div></div><div class="res"></div>';
+      '<div class="st muted small"></div>' +
+      '<p class="muted small" style="margin:16px 0 6px"><b>Trocou de fornecedor?</b> Apague o catálogo antigo antes de importar a lista nova (os clientes e revendedores não são apagados).</p>' +
+      '<button class="btn d clear">Apagar catálogo atual</button></div><div class="res"></div>';
     api("accounts.list").then(function (r) {
       $(".acc", pg).innerHTML = r.rows.length ? r.rows.map(function (a) { return '<option value="' + a.id + '">' + esc((a.label ? a.label + " — " : "") + a.username + " @ " + a.server_url) + "</option>"; }).join("")
         : '<option value="">Cadastre um acesso primeiro</option>';
@@ -468,6 +470,11 @@
         if (info && info.created) toast("Acesso " + info.username + " cadastrado em Acessos do fornecedor. Ajuste lá o número de conexões dele.");
         gotList(text);
       }).catch(function (e) { btn.disabled = false; $(".st", pg).textContent = ""; toast(e.message, true); });
+    });
+    $(".clear", pg).addEventListener("click", function () {
+      confirmBox("Apagar catálogo atual", "Apaga todos os canais, filmes, séries e categorias importados. Clientes, revendedores e acessos do fornecedor continuam. Depois importe a lista nova.", "Apagar tudo", function () {
+        return api("catalog.clear").then(function () { toast("Catálogo apagado. Agora importe a lista do fornecedor novo."); });
+      });
     });
     function gotList(text) {
       {
