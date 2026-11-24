@@ -573,6 +573,43 @@
       cats.map(function (c) { return '<option value="' + c.id + '"' + (String(sel) === String(c.id) ? " selected" : "") + ">" + esc(c.name) + (c.enabled ? "" : " (oculta)") + "</option>"; }).join("");
   }
 
+  /** Select de categoria com o botão "+ Nova" ao lado (cria a categoria na hora) */
+  function catField(cats, sel) {
+    return '<label>Categoria</label><div class="bar" style="margin:0;flex-wrap:nowrap"><select name="category_id" style="flex:1">' + catOptions(cats, sel) +
+      '</select><button type="button" class="btn s newcat">+ Nova</button></div>';
+  }
+  function bindNewCat(el, kind, cats) {
+    var b = $(".newcat", el); if (!b) return;
+    b.addEventListener("click", function () {
+      modal("Nova categoria", '<label>Nome da categoria</label><input name="cname" placeholder="Ex.: Lançamentos">', [{ label: "Cancelar" }, { label: "Criar", primary: true, onClick: function (m2) {
+        var name = val(m2, "cname"); if (!name) throw new Error("Informe o nome da categoria");
+        return api("catalog.save", { table: "categories", row: { kind: kind, name: name, sort: 0, enabled: true, adult: false } }).then(function (r) {
+          cats.push(r.row);
+          var sel = $('[name="category_id"]', el);
+          sel.insertAdjacentHTML("beforeend", '<option value="' + r.row.id + '">' + esc(r.row.name) + "</option>");
+          sel.value = String(r.row.id);
+          toast("Categoria criada");
+        });
+      } }]);
+    });
+  }
+  /** Campos para cadastrar vários episódios: temporada, primeiro episódio e um link por linha */
+  function epsFields(next) {
+    return '<div class="grid2"><div><label>Temporada</label><input name="b_season" type="number" min="1" value="' + ((next && next.season) || 1) + '"></div>' +
+      '<div><label>Começar no episódio</label><input name="b_start" type="number" min="1" value="' + ((next && next.episode) || 1) + '"></div></div>' +
+      '<label>Links dos episódios — <b>um por linha</b>, na ordem (mp4, m3u8 ou YouTube). <span class="muted b_count">0 episódio(s)</span></label>' +
+      '<textarea name="b_urls" style="min-height:140px" placeholder="http://…/episodio1.mp4&#10;http://…/episodio2.mp4&#10;https://www.youtube.com/watch?v=…"></textarea>';
+  }
+  function bindEpsCount(el) {
+    var t = $('[name="b_urls"]', el), c = $(".b_count", el); if (!t || !c) return;
+    t.addEventListener("input", function () { var n = t.value.split(/\r?\n/).filter(function (x) { return /^https?:\/\//i.test(x.trim()); }).length; c.textContent = n + " episódio(s)"; });
+  }
+  function saveEpsBulk(el, seriesId) {
+    var urls = ($('[name="b_urls"]', el) || {}).value || "";
+    if (!urls.trim()) return Promise.resolve(0);
+    return api("episodes.bulk", { series_id: seriesId, season: +val(el, "b_season") || 1, start: +val(el, "b_start") || 1, urls: urls }).then(function (r) { return r.added; });
+  }
+
   function viewStreams(kind) {
     var live = kind === "live", tbl = "streams";
     var pg = page(live ? "Canais" : "Filmes", '<button class="btn p" data-a="new">+ ' + (live ? "Novo canal" : "Novo filme") + "</button>");
@@ -611,10 +648,10 @@
     }
     function edit(s) {
       s = s || { kind: kind, enabled: true, sort: 0, ext: live ? "ts" : "mp4" };
-      setTimeout(function () { var el = $$(".modal").pop(); if (el) ytHint(el); }, 0);
+      setTimeout(function () { var el = $$(".modal").pop(); if (el) { ytHint(el); bindNewCat(el, kind, cats); } }, 0);
       var m = modal(s.id ? "Editar" : (live ? "Novo canal" : "Novo filme"),
         '<label>Nome</label><input name="name" value="' + esc(s.name) + '">' +
-        '<label>Categoria</label><select name="category_id">' + catOptions(cats, s.category_id) + "</select>" +
+        catField(cats, s.category_id) +
         '<label>' + (live ? "Logo (URL da imagem)" : "Capa (URL da imagem)") + '</label><input name="logo" value="' + esc(s.logo) + '">' +
         '<div class="grid2"><div><label>ID no fornecedor</label><input name="provider_stream_id" value="' + esc(s.provider_stream_id) + '"></div><div><label>Formato</label>' + extSelect(s.ext, live) + '</div></div>' +
         '<label>Ou link próprio — pode ser um link do <b>YouTube</b> (opcional; use {server}, {user} e {pass} para o acesso do cliente)</label><input name="custom_url" placeholder="https://www.youtube.com/watch?v=… ou http://…/video.mp4" value="' + esc(s.custom_url) + '">' +
@@ -681,21 +718,36 @@
     }
     function edit(s) {
       s = s || { enabled: true, sort: 0 };
+      var isNew = !s.id;
+      setTimeout(function () { var el = $$(".modal").pop(); if (el) { bindNewCat(el, "series", cats); bindEpsCount(el); } }, 0);
       modal(s.id ? "Editar série" : "Nova série",
-        '<label>Nome</label><input name="name" value="' + esc(s.name) + '"><label>Categoria</label><select name="category_id">' + catOptions(cats, s.category_id) + "</select>" +
+        '<label>Nome</label><input name="name" value="' + esc(s.name) + '">' + catField(cats, s.category_id) +
         '<label>Capa (URL)</label><input name="cover" value="' + esc(s.cover) + '"><div class="grid2"><div><label>Ano</label><input name="year" value="' + esc(s.year) + '"></div><div><label>Nota (0 a 10)</label><input name="rating" value="' + esc(s.rating) + '"></div></div>' +
-        '<label>Sinopse</label><textarea name="plot">' + esc(s.plot) + '</textarea><div class="grid2"><div><label>Ordem</label><input name="sort" type="number" value="' + (s.sort || 0) + '"></div><div><label>&nbsp;</label><label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:8px 0"><input type="checkbox" class="chk" name="enabled"' + (s.enabled ? " checked" : "") + "> Visível</label></div></div>",
+        '<label>Sinopse</label><textarea name="plot">' + esc(s.plot) + '</textarea><div class="grid2"><div><label>Ordem</label><input name="sort" type="number" value="' + (s.sort || 0) + '"></div><div><label>&nbsp;</label><label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:8px 0"><input type="checkbox" class="chk" name="enabled"' + (s.enabled ? " checked" : "") + "> Visível</label></div></div>" +
+        (isNew ? '<div class="box" style="margin-top:12px"><b>Episódios</b> <span class="muted small">(opcional — dá para adicionar depois em "Episódios")</span>' + epsFields() + "</div>" : ""),
         [{ label: "Cancelar" }, { label: "Salvar", primary: true, onClick: function (el) {
           return api("catalog.save", { table: "series", row: { id: s.id, name: val(el, "name"), category_id: val(el, "category_id") ? +val(el, "category_id") : null, cover: val(el, "cover"),
-            year: val(el, "year"), rating: val(el, "rating"), plot: $('[name="plot"]', el).value, sort: +val(el, "sort") || 0, enabled: val(el, "enabled") } }).then(function () { toast("Salvo"); load(); });
-        } }]);
+            year: val(el, "year"), rating: val(el, "rating"), plot: $('[name="plot"]', el).value, sort: +val(el, "sort") || 0, enabled: val(el, "enabled") } }).then(function (r) {
+            return (isNew ? saveEpsBulk(el, r.row.id) : Promise.resolve(0)).then(function (n) { toast(n ? "Série salva com " + n + " episódio(s)" : "Salvo"); load(); });
+          });
+        } }], true);
     }
     function episodes(s) {
-      var m = modal("Episódios — " + s.name, '<div class="eps"><div class="empty">Carregando…</div></div>', [{ label: "+ Episódio", onClick: function () { editEp(null); return true; } }, { label: "Fechar", primary: true }], true);
+      var lastEp = null;
+      var m = modal("Episódios — " + s.name, '<div class="eps"><div class="empty">Carregando…</div></div>', [{ label: "+ Vários episódios", onClick: function () { addMany(); return true; } }, { label: "+ Episódio", onClick: function () { editEp(null); return true; } }, { label: "Fechar", primary: true }], true);
+      function addMany() {
+        var next = lastEp ? { season: lastEp.season, episode: lastEp.episode + 1 } : null;
+        setTimeout(function () { var el = $$(".modal").pop(); if (el) bindEpsCount(el); }, 0);
+        modal("Vários episódios — " + s.name, epsFields(next), [{ label: "Cancelar" }, { label: "Adicionar", primary: true, onClick: function (el) {
+          if (!($('[name="b_urls"]', el).value || "").trim()) throw new Error("Cole os links dos episódios, um por linha");
+          return saveEpsBulk(el, s.id).then(function (n) { toast(n + " episódio(s) adicionado(s)"); loadEps(); });
+        } }], true);
+      }
       function loadEps() {
         api("catalog.list", { table: "episodes", series_id: s.id, per: 500 }).then(function (r) {
           var box = $(".eps", m.el);
-          if (!r.rows.length) { box.innerHTML = '<div class="empty">Nenhum episódio.</div>'; return; }
+          lastEp = r.rows.reduce(function (a, e) { return !a || e.season > a.season || (e.season === a.season && e.episode > a.episode) ? e : a; }, null);
+          if (!r.rows.length) { box.innerHTML = '<div class="empty">Nenhum episódio. Use "+ Vários episódios" para colar os links de uma vez.</div>'; return; }
           box.innerHTML = '<div class="tw"><table><thead><tr><th>Temp.</th><th>Ep.</th><th>Título</th><th></th></tr></thead><tbody>' +
             r.rows.map(function (e, i) { return "<tr><td>" + e.season + "</td><td>" + e.episode + "</td><td>" + esc(e.title) + '</td><td><button class="btn s" data-i="' + i + '">Editar</button></td></tr>'; }).join("") + "</tbody></table></div>";
           $$("[data-i]", box).forEach(function (b) { b.addEventListener("click", function () { editEp(r.rows[+b.getAttribute("data-i")]); }); });
