@@ -199,8 +199,13 @@
     }
     ms.addEventListener("change", upd); cs.addEventListener("change", upd); upd();
   }
-  function connsSelect(cur) {
-    var o = ""; for (var i = 1; i <= 10; i++) o += '<option value="' + i + '"' + (i === (cur || 1) ? " selected" : "") + ">" + i + (i === 1 ? " tela" : " telas") + "</option>";
+  function adultSelect(cur) {
+    return '<label>Conteúdo</label><select name="allow_adult"><option value="1"' + (cur !== false ? " selected" : "") + '>Lista completa (com adultos)</option><option value="0"' + (cur === false ? " selected" : "") + ">Sem adultos</option></select>";
+  }
+  function connsSelect(cur, trial) {
+    if (trial) return '<label>Conexões (telas)</label><select name="max_connections" disabled><option value="1">1 tela (teste)</option></select>';
+    var max = S.me.role === "admin" ? 10 : 2;
+    var o = ""; for (var i = 1; i <= max; i++) o += '<option value="' + i + '"' + (i === (cur || 1) ? " selected" : "") + ">" + i + (i === 1 ? " tela" : " telas") + "</option>";
     return '<label>Conexões (telas ao mesmo tempo)</label><select name="max_connections">' + o + "</select>";
   }
   function viewClientes() {
@@ -217,7 +222,7 @@
         if (!r.rows.length) { $(".tw", pg).innerHTML = '<div class="empty">Nenhum cliente encontrado.</div>'; $(".pager", pg).innerHTML = ""; return; }
         $(".tw", pg).innerHTML = "<table><thead><tr><th>Usuário</th><th>Senha</th><th>Vencimento</th><th>Telas</th><th>Status</th>" + (admin ? "<th>Dono</th>" : "") + "<th>Obs.</th><th></th></tr></thead><tbody>" +
           r.rows.map(function (l, i) {
-            return "<tr><td class=mono>" + esc(l.username) + "</td><td class=mono>" + esc(l.password) + "</td><td>" + fmtDate(l.expires_at, true) + "</td><td>" + (l.max_connections || 1) + "</td><td>" + statusTag(l) + "</td>" +
+            return "<tr><td class=mono>" + esc(l.username) + "</td><td class=mono>" + esc(l.password) + "</td><td>" + fmtDate(l.expires_at, true) + "</td><td>" + (l.max_connections || 1) + (l.allow_adult === false ? ' <span class="tag">sem +18</span>' : "") + "</td><td>" + statusTag(l) + "</td>" +
               (admin ? "<td>" + esc(l.reseller_name) + "</td>" : "") + '<td class="small muted">' + esc(l.notes) + '</td><td><div class="acts">' +
               '<button class="btn s" data-i="' + i + '" data-x="dados">Dados</button><button class="btn s" data-i="' + i + '" data-x="renew">Renovar</button>' +
               '<button class="btn s" data-i="' + i + '" data-x="edit">Editar</button></div></td></tr>';
@@ -242,7 +247,7 @@
       if (x === "edit") {
         var m = modal("Editar " + l.username,
           '<label>Observação (nome do cliente, telefone…)</label><input name="notes" value="' + esc(l.notes) + '">' +
-          '<label>Nova senha (deixe em branco para manter)</label><input name="password" placeholder="' + esc(l.password) + '">' + connsSelect(l.max_connections) +
+          '<label>Nova senha (deixe em branco para manter)</label><input name="password" placeholder="' + esc(l.password) + '">' + connsSelect(l.max_connections, l.is_trial) + adultSelect(l.allow_adult) +
           (admin ? '<label>Vencimento</label><input name="expires_at" type="datetime-local" value="' + toLocalInput(l.expires_at) + '">' : "") +
           '<label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" class="chk" name="enabled"' + (l.enabled ? " checked" : "") + "> Ativo (desmarque para bloquear)</label>",
           [{ label: "Apagar", danger: true, onClick: function () {
@@ -251,7 +256,7 @@
           } },
           { label: "Cancelar" },
           { label: "Salvar", primary: true, onClick: function (el) {
-            var b = { id: l.id, notes: val(el, "notes"), enabled: val(el, "enabled"), max_connections: +val(el, "max_connections") || 1 };
+            var b = { id: l.id, notes: val(el, "notes"), enabled: val(el, "enabled"), max_connections: +val(el, "max_connections") || 1, allow_adult: val(el, "allow_adult") !== "0" };
             if (val(el, "password")) b.password = val(el, "password");
             if (admin && val(el, "expires_at")) b.expires_at = new Date(val(el, "expires_at")).toISOString();
             return api("lines.update", b).then(function () { toast("Salvo"); load(); });
@@ -260,12 +265,12 @@
     }
     function create(trial) {
       var body = (trial ? '<p class="muted">Teste grátis de <b>' + S.me.settings.trial_hours + " hora(s)</b>.</p>" : '<label>Plano</label><select name="months">' + plansOptions() + "</select>") +
-        connsSelect(1) +
+        connsSelect(1, trial) + adultSelect(true) +
         '<label>Observação (nome do cliente, telefone…)</label><input name="notes">' +
         '<div class="grid2"><div><label>Usuário (opcional)</label><input name="username" placeholder="automático"></div><div><label>Senha (opcional)</label><input name="password" placeholder="automática"></div></div>';
       if (!trial) setTimeout(function () { var el = $$(".modal").pop(); if (el) bindCost(el); }, 0);
       modal(trial ? "Novo teste grátis" : "Novo cliente", body, [{ label: "Cancelar" }, { label: trial ? "Criar teste" : "Criar cliente", primary: true, onClick: function (el) {
-        var b = { trial: trial, notes: val(el, "notes"), username: val(el, "username"), password: val(el, "password"), max_connections: +val(el, "max_connections") || 1 };
+        var b = { trial: trial, notes: val(el, "notes"), username: val(el, "username"), password: val(el, "password"), max_connections: trial ? 1 : (+val(el, "max_connections") || 1), allow_adult: val(el, "allow_adult") !== "0" };
         if (!trial) b.months = +val(el, "months");
         return api("lines.create", b).then(function (r) { refreshCredits(); load(); showAccess(r.line, trial ? "Teste criado" : "Cliente criado"); });
       } }]);
