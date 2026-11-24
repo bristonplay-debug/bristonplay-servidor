@@ -183,10 +183,22 @@
   }
   function plansOptions() {
     return (S.me.settings.credit_plans || []).map(function (p) {
-      return '<option value="' + p.months + '">' + p.months + (p.months == 1 ? " mês" : " meses") + (S.me.role === "admin" ? "" : " — " + p.credits + " crédito(s)") + "</option>";
+      return '<option value="' + p.months + '">' + p.months + (p.months == 1 ? " mês" : " meses") + (S.me.role === "admin" ? "" : " — " + p.credits + " crédito(s) por tela") + "</option>";
     }).join("");
   }
 
+  /** Mostra o custo em créditos (plano x telas) para revendedores */
+  function bindCost(el) {
+    if (S.me.role === "admin") return;
+    var ms = $('[name="months"]', el), cs = $('[name="max_connections"]', el); if (!ms || !cs) return;
+    var out = document.createElement("p"); out.className = "muted small"; ms.parentNode.insertBefore(out, cs.nextSibling);
+    function upd() {
+      var p = (S.me.settings.credit_plans || []).filter(function (x) { return String(x.months) === ms.value; })[0];
+      var t = p ? p.credits * (+cs.value || 1) : 0;
+      out.innerHTML = "Custo: <b>" + t + " crédito(s)</b>" + (+cs.value > 1 ? " (" + (p ? p.credits : 0) + " x " + cs.value + " telas)" : "");
+    }
+    ms.addEventListener("change", upd); cs.addEventListener("change", upd); upd();
+  }
   function connsSelect(cur) {
     var o = ""; for (var i = 1; i <= 10; i++) o += '<option value="' + i + '"' + (i === (cur || 1) ? " selected" : "") + ">" + i + (i === 1 ? " tela" : " telas") + "</option>";
     return '<label>Conexões (telas ao mesmo tempo)</label><select name="max_connections">' + o + "</select>";
@@ -221,9 +233,10 @@
     function act(x, l) {
       if (x === "dados") return showAccess(l);
       if (x === "renew") {
-        return modal("Renovar " + l.username, '<label>Plano</label><select name="months">' + plansOptions() + '</select><p class="muted small">Os meses são somados a partir do vencimento atual (ou de hoje, se já venceu).</p>',
+        setTimeout(function () { var el = $$(".modal").pop(); if (el) bindCost(el); }, 0);
+        return modal("Renovar " + l.username, '<label>Plano</label><select name="months">' + plansOptions() + "</select>" + connsSelect(l.max_connections) + '<p class="muted small">Os meses são somados a partir do vencimento atual (ou de hoje, se já venceu). O custo em créditos é multiplicado pelas telas.</p>',
           [{ label: "Cancelar" }, { label: "Renovar", primary: true, onClick: function (el) {
-            return api("lines.renew", { id: l.id, months: +val(el, "months") }).then(function (r) { toast("Renovado até " + fmtDate(r.line.expires_at)); refreshCredits(); load(); });
+            return api("lines.renew", { id: l.id, months: +val(el, "months"), max_connections: +val(el, "max_connections") || 1 }).then(function (r) { toast("Renovado até " + fmtDate(r.line.expires_at)); refreshCredits(); load(); });
           } }]);
       }
       if (x === "edit") {
@@ -250,6 +263,7 @@
         connsSelect(1) +
         '<label>Observação (nome do cliente, telefone…)</label><input name="notes">' +
         '<div class="grid2"><div><label>Usuário (opcional)</label><input name="username" placeholder="automático"></div><div><label>Senha (opcional)</label><input name="password" placeholder="automática"></div></div>';
+      if (!trial) setTimeout(function () { var el = $$(".modal").pop(); if (el) bindCost(el); }, 0);
       modal(trial ? "Novo teste grátis" : "Novo cliente", body, [{ label: "Cancelar" }, { label: trial ? "Criar teste" : "Criar cliente", primary: true, onClick: function (el) {
         var b = { trial: trial, notes: val(el, "notes"), username: val(el, "username"), password: val(el, "password"), max_connections: +val(el, "max_connections") || 1 };
         if (!trial) b.months = +val(el, "months");
