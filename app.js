@@ -465,6 +465,7 @@
     $(".go", pg).addEventListener("click", function () {
       var id = $(".acc", pg).value; if (!id) return toast("Cadastre um acesso do fornecedor primeiro", true);
       var btn = $(".go", pg); btn.disabled = true; $(".st", pg).textContent = "Baixando a lista do fornecedor (pode levar alguns minutos)…"; $(".res", pg).innerHTML = "";
+      curSrc = { account_id: +id, source: "" };
       api("provider.m3u", { account_id: +id }, true).then(function (r) { return r.text(); }).then(function (text) {
         btn.disabled = false;
         gotList(text);
@@ -480,6 +481,8 @@
         return r.text();
       }).then(function (text) {
         btn.disabled = false;
+        var L = parseLink(url);
+        curSrc = { account_id: null, source: (info && info.server_url) || (L ? L.server : "") };
         if (info && info.created) toast("Acesso " + info.username + " cadastrado em Acessos do fornecedor. Ajuste lá o número de conexões dele.");
         gotList(text);
       }).catch(function (e) { btn.disabled = false; $(".st", pg).textContent = ""; toast(e.message, true); });
@@ -489,6 +492,7 @@
         return api("catalog.clear").then(function () { toast("Catálogo apagado. Agora importe a lista do fornecedor novo."); });
       });
     });
+    var curSrc = { account_id: null, source: "" }; // de qual fornecedor é a lista lida
     function gotList(text) {
       {
         var items = parseM3U(text);
@@ -558,7 +562,7 @@
           st.textContent = "Pronto! " + streams.length + " canais/filmes, " + seriesList.length + " séries e " + eps.length + " episódios importados."; btn.disabled = false; toast("Importação concluída"); return;
         }
         st.textContent = "Enviando lote " + (n + 1) + " de " + batches.length + "…";
-        api("import.batch", batches[n]).then(function () { n++; fill.style.width = Math.round(n / batches.length * 100) + "%"; next(); })
+        api("import.batch", Object.assign({}, batches[n], curSrc)).then(function () { n++; fill.style.width = Math.round(n / batches.length * 100) + "%"; next(); })
           .catch(function (e) { btn.disabled = false; st.textContent = "Parou no lote " + (n + 1) + ": " + e.message + ". Clique em importar de novo para continuar (não duplica)."; toast(e.message, true); });
       })();
     }
