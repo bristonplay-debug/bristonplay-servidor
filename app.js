@@ -264,14 +264,16 @@
       }
     }
     function create(trial) {
-      var body = (trial ? '<p class="muted">Teste grátis de <b>' + S.me.settings.trial_hours + " hora(s)</b>.</p>" : '<label>Plano</label><select name="months">' + plansOptions() + "</select>") +
+      var defH = Math.min(4, Math.max(1, +S.me.settings.trial_hours || 4));
+      var hoursSel = '<label>Duração do teste</label><select name="trial_hours">' + [1, 2, 3, 4].map(function (h) { return '<option value="' + h + '"' + (h === defH ? " selected" : "") + ">" + h + (h === 1 ? " hora" : " horas") + "</option>"; }).join("") + "</select>";
+      var body = (trial ? hoursSel : '<label>Plano</label><select name="months">' + plansOptions() + "</select>") +
         connsSelect(1, trial) + adultSelect(true) +
         '<label>Observação (nome do cliente, telefone…)</label><input name="notes">' +
         '<div class="grid2"><div><label>Usuário (opcional)</label><input name="username" placeholder="automático"></div><div><label>Senha (opcional)</label><input name="password" placeholder="automática"></div></div>';
       if (!trial) setTimeout(function () { var el = $$(".modal").pop(); if (el) bindCost(el); }, 0);
       modal(trial ? "Novo teste grátis" : "Novo cliente", body, [{ label: "Cancelar" }, { label: trial ? "Criar teste" : "Criar cliente", primary: true, onClick: function (el) {
         var b = { trial: trial, notes: val(el, "notes"), username: val(el, "username"), password: val(el, "password"), max_connections: trial ? 1 : (+val(el, "max_connections") || 1), allow_adult: val(el, "allow_adult") !== "0" };
-        if (!trial) b.months = +val(el, "months");
+        if (!trial) b.months = +val(el, "months"); else b.trial_hours = +val(el, "trial_hours") || defH;
         return api("lines.create", b).then(function (r) { refreshCredits(); load(); showAccess(r.line, trial ? "Teste criado" : "Cliente criado"); });
       } }]);
     }
