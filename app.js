@@ -166,12 +166,12 @@
     var a = l.access;
     var row = function (label, v) { return '<label>' + label + '</label><div class="copy"><input readonly value="' + esc(v) + '"><button class="btn s" data-copy="' + esc(v) + '">Copiar</button></div>'; };
     return row("Usuário", a.username) + row("Senha", a.password) + row("Servidor (Xtream)", a.server) + row("Link M3U", a.m3u) +
-      '<p class="muted small">Vence em: <b>' + fmtDate(l.expires_at, true) + "</b></p>";
+      '<p class="muted small">Vence em: <b>' + fmtDate(l.expires_at, true) + "</b> · Telas: <b>" + (l.max_connections || 1) + "</b></p>";
   }
   function waText(l) {
     var a = l.access, name = (S.me.settings && S.me.settings.server_name) || C.brand;
     return "*" + name + "*\n\nUsuário: " + a.username + "\nSenha: " + a.password + "\nServidor: " + a.server +
-      "\n\nLink M3U:\n" + a.m3u + "\n\nVencimento: " + fmtDate(l.expires_at, true);
+      "\n\nLink M3U:\n" + a.m3u + "\n\nVencimento: " + fmtDate(l.expires_at, true) + "\nTelas: " + (l.max_connections || 1);
   }
   function showAccess(l, title) {
     var m = modal(title || "Dados do cliente", accessHtml(l), [
@@ -187,6 +187,10 @@
     }).join("");
   }
 
+  function connsSelect(cur) {
+    var o = ""; for (var i = 1; i <= 10; i++) o += '<option value="' + i + '"' + (i === (cur || 1) ? " selected" : "") + ">" + i + (i === 1 ? " tela" : " telas") + "</option>";
+    return '<label>Conexões (telas ao mesmo tempo)</label><select name="max_connections">' + o + "</select>";
+  }
   function viewClientes() {
     var admin = S.me.role === "admin";
     var pg = page("Clientes", '<button class="btn" data-a="trial">+ Teste grátis</button><button class="btn p" data-a="new">+ Novo cliente</button>');
@@ -199,9 +203,9 @@
       $(".tw", pg).innerHTML = '<div class="empty">Carregando…</div>';
       api("lines.list", st).then(function (r) {
         if (!r.rows.length) { $(".tw", pg).innerHTML = '<div class="empty">Nenhum cliente encontrado.</div>'; $(".pager", pg).innerHTML = ""; return; }
-        $(".tw", pg).innerHTML = "<table><thead><tr><th>Usuário</th><th>Senha</th><th>Vencimento</th><th>Status</th>" + (admin ? "<th>Dono</th>" : "") + "<th>Obs.</th><th></th></tr></thead><tbody>" +
+        $(".tw", pg).innerHTML = "<table><thead><tr><th>Usuário</th><th>Senha</th><th>Vencimento</th><th>Telas</th><th>Status</th>" + (admin ? "<th>Dono</th>" : "") + "<th>Obs.</th><th></th></tr></thead><tbody>" +
           r.rows.map(function (l, i) {
-            return "<tr><td class=mono>" + esc(l.username) + "</td><td class=mono>" + esc(l.password) + "</td><td>" + fmtDate(l.expires_at, true) + "</td><td>" + statusTag(l) + "</td>" +
+            return "<tr><td class=mono>" + esc(l.username) + "</td><td class=mono>" + esc(l.password) + "</td><td>" + fmtDate(l.expires_at, true) + "</td><td>" + (l.max_connections || 1) + "</td><td>" + statusTag(l) + "</td>" +
               (admin ? "<td>" + esc(l.reseller_name) + "</td>" : "") + '<td class="small muted">' + esc(l.notes) + '</td><td><div class="acts">' +
               '<button class="btn s" data-i="' + i + '" data-x="dados">Dados</button><button class="btn s" data-i="' + i + '" data-x="renew">Renovar</button>' +
               '<button class="btn s" data-i="' + i + '" data-x="edit">Editar</button></div></td></tr>';
@@ -225,7 +229,7 @@
       if (x === "edit") {
         var m = modal("Editar " + l.username,
           '<label>Observação (nome do cliente, telefone…)</label><input name="notes" value="' + esc(l.notes) + '">' +
-          '<label>Nova senha (deixe em branco para manter)</label><input name="password" placeholder="' + esc(l.password) + '">' +
+          '<label>Nova senha (deixe em branco para manter)</label><input name="password" placeholder="' + esc(l.password) + '">' + connsSelect(l.max_connections) +
           (admin ? '<label>Vencimento</label><input name="expires_at" type="datetime-local" value="' + toLocalInput(l.expires_at) + '">' : "") +
           '<label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" class="chk" name="enabled"' + (l.enabled ? " checked" : "") + "> Ativo (desmarque para bloquear)</label>",
           [{ label: "Apagar", danger: true, onClick: function () {
@@ -234,7 +238,7 @@
           } },
           { label: "Cancelar" },
           { label: "Salvar", primary: true, onClick: function (el) {
-            var b = { id: l.id, notes: val(el, "notes"), enabled: val(el, "enabled") };
+            var b = { id: l.id, notes: val(el, "notes"), enabled: val(el, "enabled"), max_connections: +val(el, "max_connections") || 1 };
             if (val(el, "password")) b.password = val(el, "password");
             if (admin && val(el, "expires_at")) b.expires_at = new Date(val(el, "expires_at")).toISOString();
             return api("lines.update", b).then(function () { toast("Salvo"); load(); });
@@ -243,10 +247,11 @@
     }
     function create(trial) {
       var body = (trial ? '<p class="muted">Teste grátis de <b>' + S.me.settings.trial_hours + " hora(s)</b>.</p>" : '<label>Plano</label><select name="months">' + plansOptions() + "</select>") +
+        connsSelect(1) +
         '<label>Observação (nome do cliente, telefone…)</label><input name="notes">' +
         '<div class="grid2"><div><label>Usuário (opcional)</label><input name="username" placeholder="automático"></div><div><label>Senha (opcional)</label><input name="password" placeholder="automática"></div></div>';
       modal(trial ? "Novo teste grátis" : "Novo cliente", body, [{ label: "Cancelar" }, { label: trial ? "Criar teste" : "Criar cliente", primary: true, onClick: function (el) {
-        var b = { trial: trial, notes: val(el, "notes"), username: val(el, "username"), password: val(el, "password") };
+        var b = { trial: trial, notes: val(el, "notes"), username: val(el, "username"), password: val(el, "password"), max_connections: +val(el, "max_connections") || 1 };
         if (!trial) b.months = +val(el, "months");
         return api("lines.create", b).then(function (r) { refreshCredits(); load(); showAccess(r.line, trial ? "Teste criado" : "Cliente criado"); });
       } }]);
