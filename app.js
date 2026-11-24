@@ -822,15 +822,16 @@
         $(".tw", pg).innerHTML = '<table><thead><tr><th>Ordem</th><th>Nome</th><th>Adulto</th><th>Status</th><th></th></tr></thead><tbody>' +
           rows.map(function (c, i) {
             return "<tr><td>" + c.sort + "</td><td>" + esc(c.name) + "</td><td>" + (c.adult ? '<span class="tag warn">Sim</span>' : "—") + "</td><td>" + (c.enabled ? '<span class="tag ok">Visível</span>' : '<span class="tag bad">Oculta</span>') +
-              '</td><td><button class="btn s" data-i="' + i + '">Editar</button></td></tr>';
+              '</td><td><div class="acts"><button class="btn s" data-m="' + i + '">' + (kind === "live" ? "Canais" : kind === "movie" ? "Filmes" : "Séries") + '</button><button class="btn s" data-i="' + i + '">Editar</button></div></td></tr>';
           }).join("") + "</tbody></table>";
         $$("[data-i]", pg).forEach(function (b) { b.addEventListener("click", function () { edit(rows[+b.getAttribute("data-i")]); }); });
+        $$("[data-m]", pg).forEach(function (b) { b.addEventListener("click", function () { manage(rows[+b.getAttribute("data-m")]); }); });
       }).catch(function (e) { $(".tw", pg).innerHTML = '<div class="empty">' + esc(e.message) + "</div>"; });
     }
     function edit(c) {
       c = c || { kind: kind, enabled: true, sort: rows.length, adult: false };
       modal(c.id ? "Editar categoria" : "Nova categoria",
-        '<label>Nome</label><input name="name" value="' + esc(c.name) + '"><label>Ordem</label><input name="sort" type="number" value="' + c.sort + '">' +
+        '<label>Nome <span class="muted small">(o nome que você colocar fica, mesmo importando a lista do fornecedor de novo)</span></label><input name="name" value="' + esc(c.name) + '"><label>Ordem</label><input name="sort" type="number" value="' + c.sort + '">' +
         '<label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" class="chk" name="adult"' + (c.adult ? " checked" : "") + "> Conteúdo adulto (o app pede PIN)</label>" +
         '<label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" class="chk" name="enabled"' + (c.enabled ? " checked" : "") + "> Visível</label>",
         (c.id ? [{ label: "Apagar", danger: true, onClick: function () { return api("catalog.bulk", { table: "categories", ids: [c.id], op: "delete" }).then(function () { toast("Apagada (os itens ficam sem categoria)"); load(); }); } }] : [])
@@ -838,6 +839,53 @@
             return api("catalog.save", { table: "categories", row: { id: c.id, kind: c.kind, name: val(el, "name"), sort: +val(el, "sort") || 0, adult: val(el, "adult"), enabled: val(el, "enabled") } })
               .then(function () { toast("Salvo"); load(); });
           } }]));
+    }
+    /** Escolher os itens da categoria: ver os que estão nela e trazer de outras categorias */
+    function manage(c) {
+      var tbl = kind === "series" ? "series" : "streams", lk = kind === "series" ? null : kind;
+      var word = kind === "live" ? "canais" : kind === "movie" ? "filmes" : "séries";
+      var m = modal("Categoria: " + c.name,
+        '<b>Nesta categoria</b> <span class="muted small cnt"></span><div class="here" style="max-height:220px;overflow:auto;margin:6px 0"></div>' +
+        '<button class="btn s out">Tirar os marcados desta categoria</button>' +
+        '<div style="margin-top:16px"><b>Trazer ' + word + ' de outras categorias</b></div>' +
+        '<div class="bar" style="margin:6px 0"><input class="sq" placeholder="Buscar pelo nome" style="flex:1"><select class="sc"><option value="">Todas as categorias</option><option value="none">Sem categoria</option>' +
+        rows.filter(function (x) { return x.id !== c.id; }).map(function (x) { return '<option value="' + x.id + '">' + esc(x.name) + "</option>"; }).join("") + "</select></div>" +
+        '<div class="found" style="max-height:260px;overflow:auto"><div class="muted small">Busque pelo nome ou escolha uma categoria.</div></div>' +
+        '<button class="btn p in" style="margin-top:8px">Trazer os marcados para esta categoria</button>', [{ label: "Fechar", primary: true }], true);
+      var el = m.el, here = [], found = [];
+      function itemRow(x, i, cls) {
+        var img = x.logo || x.cover;
+        return '<label style="display:flex;gap:10px;align-items:center;padding:4px 0;color:var(--text)"><input type="checkbox" class="chk ' + cls + '" data-i="' + i + '">' +
+          (img ? '<img class="thumb" src="' + esc(img) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">' : "") + esc(x.name) + "</label>";
+      }
+      function loadHere() {
+        api("catalog.list", { table: tbl, kind: lk, category_id: c.id, per: 500 }).then(function (r) {
+          here = r.rows; $(".cnt", el).textContent = "(" + r.count + ")";
+          $(".here", el).innerHTML = here.length ? here.map(function (x, i) { return itemRow(x, i, "h"); }).join("") : '<div class="muted small">Nenhum item nesta categoria ainda.</div>';
+        });
+      }
+      function search() {
+        var q = $(".sq", el).value.trim(), cat = $(".sc", el).value;
+        if (!q && !cat) { $(".found", el).innerHTML = '<div class="muted small">Busque pelo nome ou escolha uma categoria.</div>'; return; }
+        $(".found", el).innerHTML = '<div class="muted small">Buscando…</div>';
+        api("catalog.list", { table: tbl, kind: lk, q: q, category_id: cat, per: 300 }).then(function (r) {
+          found = r.rows.filter(function (x) { return x.category_id !== c.id; });
+          $(".found", el).innerHTML = found.length ? found.map(function (x, i) { return itemRow(x, i, "f"); }).join("") + (r.count > 300 ? '<div class="muted small">Mostrando os primeiros 300 — refine a busca.</div>' : "")
+            : '<div class="muted small">Nada encontrado.</div>';
+        });
+      }
+      $(".sq", el).addEventListener("input", debounce(search, 350));
+      $(".sc", el).addEventListener("change", search);
+      function picked(cls, list) { return $$("." + cls + ":checked", el).map(function (b) { return list[+b.getAttribute("data-i")].id; }); }
+      $(".in", el).addEventListener("click", function () {
+        var ids = picked("f", found); if (!ids.length) return toast("Marque o que quer trazer", true);
+        api("catalog.bulk", { table: tbl, ids: ids, op: "update", patch: { category_id: c.id } }).then(function () { toast(ids.length + " trazido(s) para " + c.name); loadHere(); search(); }).catch(function (e) { toast(e.message, true); });
+      });
+      $(".out", el).addEventListener("click", function () {
+        var ids = picked("h", here); if (!ids.length) return toast("Marque o que quer tirar", true);
+        api("catalog.bulk", { table: tbl, ids: ids, op: "update", patch: { category_id: null } }).then(function () { toast(ids.length + " tirado(s) da categoria"); loadHere(); }).catch(function (e) { toast(e.message, true); });
+      });
+      loadHere();
     }
     $(".k", pg).addEventListener("change", function (e) { kind = e.target.value; load(); });
     $('[data-a="new"]').addEventListener("click", function () { edit(null); });
