@@ -395,6 +395,19 @@
     load();
   }
 
+  // formato do vídeo (inclui YouTube, que abre no player do YouTube dentro do app BristonPlay)
+  var YT_RE = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)[\w-]{11}/i;
+  function extSelect(cur, live) {
+    var opts = live ? [["ts", "TS (padrão)"], ["m3u8", "M3U8 / HLS"], ["youtube", "YouTube"]] : [["mp4", "MP4 (padrão)"], ["mkv", "MKV"], ["avi", "AVI"], ["m3u8", "M3U8 / HLS"], ["youtube", "YouTube"]];
+    if (cur && !opts.some(function (o) { return o[0] === cur; })) opts.push([cur, cur.toUpperCase()]);
+    return '<select name="ext">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === (cur || opts[0][0]) ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") + "</select>";
+  }
+  function fixExt(row) { if (row.custom_url && YT_RE.test(row.custom_url)) row.ext = "youtube"; return row; }
+  function ytHint(el) {
+    var cu = $('[name="custom_url"]', el), ex = $('[name="ext"]', el);
+    if (cu && ex) cu.addEventListener("input", function () { if (YT_RE.test(cu.value)) { ex.value = "youtube"; } });
+  }
+
   // lê um link de lista (…/playlist/usuario/senha/…, …/get/usuario/senha, get.php?username=…&password=…)
   function parseLink(v) {
     v = String(v || "").trim();
@@ -598,12 +611,13 @@
     }
     function edit(s) {
       s = s || { kind: kind, enabled: true, sort: 0, ext: live ? "ts" : "mp4" };
+      setTimeout(function () { var el = $$(".modal").pop(); if (el) ytHint(el); }, 0);
       var m = modal(s.id ? "Editar" : (live ? "Novo canal" : "Novo filme"),
         '<label>Nome</label><input name="name" value="' + esc(s.name) + '">' +
         '<label>Categoria</label><select name="category_id">' + catOptions(cats, s.category_id) + "</select>" +
         '<label>' + (live ? "Logo (URL da imagem)" : "Capa (URL da imagem)") + '</label><input name="logo" value="' + esc(s.logo) + '">' +
-        '<div class="grid2"><div><label>ID no fornecedor</label><input name="provider_stream_id" value="' + esc(s.provider_stream_id) + '"></div><div><label>Extensão</label><input name="ext" value="' + esc(s.ext) + '"></div></div>' +
-        '<label>Ou link próprio (opcional — use {server}, {user} e {pass} para o acesso do cliente)</label><input name="custom_url" value="' + esc(s.custom_url) + '">' +
+        '<div class="grid2"><div><label>ID no fornecedor</label><input name="provider_stream_id" value="' + esc(s.provider_stream_id) + '"></div><div><label>Formato</label>' + extSelect(s.ext, live) + '</div></div>' +
+        '<label>Ou link próprio — pode ser um link do <b>YouTube</b> (opcional; use {server}, {user} e {pass} para o acesso do cliente)</label><input name="custom_url" placeholder="https://www.youtube.com/watch?v=… ou http://…/video.mp4" value="' + esc(s.custom_url) + '">' +
         (live ? '<label>ID do guia (EPG)</label><input name="epg_id" value="' + esc(s.epg_id) + '">' :
           '<div class="grid2"><div><label>Ano</label><input name="year" value="' + esc(s.year) + '"></div><div><label>Nota (0 a 10)</label><input name="rating" value="' + esc(s.rating) + '"></div></div><label>Sinopse</label><textarea name="plot">' + esc(s.plot) + "</textarea>") +
         '<div class="grid2"><div><label>Ordem</label><input name="sort" type="number" value="' + (s.sort || 0) + '"></div><div><label>&nbsp;</label><label style="display:flex;gap:8px;align-items:center;color:var(--text);margin:8px 0"><input type="checkbox" class="chk" name="enabled"' + (s.enabled ? " checked" : "") + "> Visível</label></div></div>",
@@ -614,6 +628,8 @@
               sort: +val(el, "sort") || 0, enabled: val(el, "enabled") };
             if (live) row.epg_id = val(el, "epg_id"); else { row.year = val(el, "year"); row.rating = val(el, "rating"); row.plot = $('[name="plot"]', el).value; }
             if (!row.provider_stream_id && !row.custom_url) throw new Error("Informe o ID no fornecedor ou um link próprio");
+            fixExt(row);
+            if (row.ext === "youtube" && !(row.custom_url && YT_RE.test(row.custom_url))) throw new Error("No formato YouTube, cole o link do vídeo do YouTube em \"link próprio\"");
             return api("catalog.save", { table: tbl, row: row }).then(function () { toast("Salvo"); load(); });
           } }]));
     }
@@ -687,15 +703,18 @@
       }
       function editEp(e) {
         e = e || { season: 1, episode: 1, ext: "mp4" };
+        setTimeout(function () { var el = $$(".modal").pop(); if (el) ytHint(el); }, 0);
         modal(e.id ? "Editar episódio" : "Novo episódio",
           '<div class="grid2"><div><label>Temporada</label><input name="season" type="number" value="' + e.season + '"></div><div><label>Episódio</label><input name="episode" type="number" value="' + e.episode + '"></div></div>' +
-          '<label>Título</label><input name="title" value="' + esc(e.title) + '"><div class="grid2"><div><label>ID no fornecedor</label><input name="provider_stream_id" value="' + esc(e.provider_stream_id) + '"></div><div><label>Extensão</label><input name="ext" value="' + esc(e.ext) + '"></div></div>' +
-          '<label>Ou link próprio (opcional)</label><input name="custom_url" value="' + esc(e.custom_url) + '">',
+          '<label>Título</label><input name="title" value="' + esc(e.title) + '"><div class="grid2"><div><label>ID no fornecedor</label><input name="provider_stream_id" value="' + esc(e.provider_stream_id) + '"></div><div><label>Formato</label>' + extSelect(e.ext, false) + '</div></div>' +
+          '<label>Ou link próprio — pode ser um link do <b>YouTube</b> (opcional)</label><input name="custom_url" placeholder="https://www.youtube.com/watch?v=…" value="' + esc(e.custom_url) + '">',
           (e.id ? [{ label: "Apagar", danger: true, onClick: function () { return api("catalog.bulk", { table: "episodes", ids: [e.id], op: "delete" }).then(loadEps); } }] : [])
             .concat([{ label: "Cancelar" }, { label: "Salvar", primary: true, onClick: function (el) {
               var row = { id: e.id, series_id: s.id, season: +val(el, "season") || 1, episode: +val(el, "episode") || 1, title: val(el, "title"),
                 provider_stream_id: val(el, "provider_stream_id") || null, ext: val(el, "ext") || "mp4", custom_url: val(el, "custom_url") || null };
               if (!row.provider_stream_id && !row.custom_url) throw new Error("Informe o ID no fornecedor ou um link próprio");
+              fixExt(row);
+              if (row.ext === "youtube" && !(row.custom_url && YT_RE.test(row.custom_url))) throw new Error("No formato YouTube, cole o link do vídeo do YouTube em \"link próprio\"");
               return api("catalog.save", { table: "episodes", row: row }).then(loadEps);
             } }]));
       }
