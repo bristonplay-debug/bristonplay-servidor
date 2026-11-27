@@ -111,7 +111,7 @@
   // ============================================================ estrutura
   var ADMIN_NAV = [["inicio", "Início"], ["clientes", "Clientes"], ["revendedores", "Revendedores"], "Conteúdo",
     ["canais", "Canais"], ["filmes", "Filmes"], ["series", "Séries"], ["categorias", "Categorias"], "Fornecedor",
-    ["acessos", "Acessos do fornecedor"], ["importar", "Importar do fornecedor"], "Sistema", ["ajustes", "Ajustes"]];
+    ["fornecedor", "Listas do fornecedor"], "Sistema", ["ajustes", "Ajustes"]];
   var RES_NAV = [["inicio", "Início"], ["clientes", "Clientes"], ["conta", "Minha conta"]];
 
   function renderShell() {
@@ -147,7 +147,7 @@
       var html = "";
       if (admin) {
         var free = s.accounts_total - s.accounts_used;
-        if (!s.accounts_total) html += '<div class="alert bad">Nenhum acesso do fornecedor cadastrado. Cadastre em <a href="#acessos">Acessos do fornecedor</a> para poder criar clientes.</div>';
+        if (!s.accounts_total) html += '<div class="alert bad">Nenhum acesso do fornecedor cadastrado. Cadastre em <a href="#fornecedor">Listas do fornecedor</a> para poder criar clientes.</div>';
         else if (free <= 0) html += '<div class="alert bad">Todos os acessos do fornecedor estão em uso. Novos clientes e testes vão falhar até você cadastrar mais acessos.</div>';
         else if (free <= Math.max(2, s.accounts_total * 0.1)) html += '<div class="alert">Restam só ' + free + ' acessos livres do fornecedor. Compre mais em breve.</div>';
         cards.push(["accfree", "Acessos livres do fornecedor"], ["resellers", "Revendedores"], ["live", "Canais"], ["movies", "Filmes"], ["series", "Séries"]);
@@ -476,48 +476,76 @@
   }
 
   function viewImportar() {
-    var pg = page("Importar do fornecedor");
-    pg.innerHTML = '<div class="box"><p class="muted small" style="margin-top:0">Escolha um acesso do fornecedor. O painel baixa a lista dele e você marca quais categorias quer na sua lista. Itens já importados são atualizados (não duplicam).</p>' +
-      '<div class="bar"><select class="acc"><option value="">Carregando acessos…</option></select><button class="btn p go">Baixar lista do fornecedor</button></div>' +
-      '<p class="muted small" style="margin:14px 0 6px"><b>Ou cole o link da lista completa M3U</b> que o fornecedor mandou (ex.: http://servidor:80/playlist/usuario/senha/m3u_plus ou …/get.php?username=…). O acesso dela é cadastrado sozinho.</p>' +
-      '<div class="bar"><input class="url" placeholder="Cole aqui o link da lista do fornecedor" style="flex:1;min-width:220px"><button class="btn p gourl">Ler este link</button></div>' +
-      '<div class="st muted small"></div>' +
-      '<p class="muted small" style="margin:16px 0 6px"><b>Trocou de fornecedor?</b> Apague o catálogo antigo antes de importar a lista nova (os clientes e revendedores não são apagados).</p>' +
-      '<button class="btn d clear">Apagar catálogo atual</button></div><div class="res"></div>';
-    api("accounts.list").then(function (r) {
-      $(".acc", pg).innerHTML = r.rows.length ? r.rows.map(function (a) { return '<option value="' + a.id + '">' + esc((a.label ? a.label + " — " : "") + a.username + " @ " + a.server_url) + "</option>"; }).join("")
-        : '<option value="">Cadastre um acesso primeiro</option>';
-    });
-    $(".go", pg).addEventListener("click", function () {
-      var id = $(".acc", pg).value; if (!id) return toast("Cadastre um acesso do fornecedor primeiro", true);
-      var btn = $(".go", pg); btn.disabled = true; $(".st", pg).textContent = "Baixando a lista do fornecedor (pode levar alguns minutos)…"; $(".res", pg).innerHTML = "";
-      curSrc = { account_id: +id, source: "" };
-      api("provider.m3u", { account_id: +id }, true).then(function (r) { return r.text(); }).then(function (text) {
-        btn.disabled = false;
-        gotList(text);
-      }).catch(function (e) { btn.disabled = false; $(".st", pg).textContent = ""; toast(e.message, true); });
-    });
+    var pg = page("Listas do fornecedor");
+    pg.innerHTML = '<div class="box"><p class="muted small" style="margin-top:0"><b>Cole o link da lista M3U</b> que o fornecedor mandou (ex.: http://servidor:8080/get.php?username=…&password=… ou …/playlist/usuario/senha/m3u_plus). O painel lê a lista, você marca o que quer e salva. Itens já salvos são atualizados (não duplicam).</p>' +
+      '<input class="url" placeholder="Cole aqui o link da lista do fornecedor" style="width:100%;box-sizing:border-box">' +
+      '<div class="bar" style="margin-top:10px"><label class="small muted" style="display:flex;align-items:center;gap:6px">Telas (conexões) deste acesso <input class="conns" type="number" min="1" value="1" style="width:70px"></label>' +
+      '<button class="btn p gourl">Ler lista</button></div>' +
+      '<div class="st muted small"></div></div>' +
+      '<div class="res"></div>' +
+      '<div class="box"><b>Listas cadastradas</b><p class="muted small" style="margin:4px 0 8px">Cada cliente ativo (ou teste) ocupa uma tela de uma destas listas.</p><div class="saved"><div class="empty">Carregando…</div></div>' +
+      '<p class="muted small" style="margin:16px 0 6px"><b>Trocou de fornecedor?</b> Apague o conteúdo antigo antes de salvar a lista nova (clientes e revendedores não são apagados).</p>' +
+      '<button class="btn d clear">Apagar todo o conteúdo</button></div>';
+    function loadSaved() {
+      api("accounts.list").then(function (r) {
+        var el = $(".saved", pg);
+        if (!r.rows.length) { el.innerHTML = '<div class="empty">Nenhuma lista cadastrada. Cole o link acima.</div>'; return; }
+        el.innerHTML = '<div class="tw"><table><thead><tr><th>Servidor</th><th>Usuário</th><th>Telas em uso</th><th>Vence</th><th></th></tr></thead><tbody>' +
+          r.rows.map(function (a, i) {
+            var full = a.in_use >= a.max_connections;
+            return '<tr><td class="small mono">' + esc(a.server_url) + '</td><td class="mono">' + esc(a.username) + '</td><td><span class="tag ' + (full ? "warn" : "ok") + '">' + a.in_use + " / " + a.max_connections + "</span>" + (a.enabled ? "" : ' <span class="tag bad">Desativada</span>') + "</td><td>" + fmtDate(a.expires_at) + "</td>" +
+              '<td style="white-space:nowrap"><button class="btn s" data-read="' + i + '">Ler de novo</button> <button class="btn s" data-ed="' + i + '">Telas</button> <button class="btn s d" data-del="' + i + '">Excluir</button></td></tr>';
+          }).join("") + "</tbody></table></div>";
+        $$("[data-read]", el).forEach(function (bt) { bt.addEventListener("click", function () { readAccount(r.rows[+bt.getAttribute("data-read")]); }); });
+        $$("[data-ed]", el).forEach(function (bt) { bt.addEventListener("click", function () { editConns(r.rows[+bt.getAttribute("data-ed")]); }); });
+        $$("[data-del]", el).forEach(function (bt) { bt.addEventListener("click", function () {
+          var a = r.rows[+bt.getAttribute("data-del")];
+          confirmBox("Excluir lista", "Exclui o acesso " + a.username + " (" + a.server_url + "). O conteúdo já salvo continua; os clientes que usavam este acesso passam para outro livre.", "Excluir", function () {
+            return api("accounts.delete", { id: a.id }).then(function () { toast("Lista excluída"); loadSaved(); });
+          });
+        }); });
+      }).catch(function (e) { $(".saved", pg).innerHTML = '<div class="empty">' + esc(e.message) + "</div>"; });
+    }
+    function editConns(a) {
+      modal("Telas da lista " + a.username,
+        '<div class="grid2"><div><label>Telas (conexões)</label><input name="max_connections" type="number" min="1" value="' + (a.max_connections || 1) + '"></div><div><label>Vence em (opcional)</label><input name="expires_at" type="date" value="' + (a.expires_at ? a.expires_at.slice(0, 10) : "") + '"></div></div>' +
+        '<label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" class="chk" name="enabled"' + (a.enabled ? " checked" : "") + "> Ativa</label>",
+        [{ label: "Cancelar" }, { label: "Salvar", primary: true, onClick: function (el) {
+          return api("accounts.save", { row: { id: a.id, label: a.label, server_url: a.server_url, username: a.username, password: a.password, notes: a.notes,
+            max_connections: +val(el, "max_connections") || 1, expires_at: val(el, "expires_at") ? new Date(val(el, "expires_at") + "T23:59:00").toISOString() : null,
+            enabled: val(el, "enabled") } }).then(function () { toast("Salvo"); loadSaved(); });
+        } }]);
+    }
+    function readAccount(a) {
+      $(".st", pg).textContent = "Lendo a lista de " + a.username + " (pode levar alguns minutos)…"; $(".res", pg).innerHTML = "";
+      curSrc = { account_id: a.id, source: "" };
+      window.scrollTo(0, 0);
+      api("provider.m3u", { account_id: a.id }, true).then(function (r) { return r.text(); }).then(gotList)
+        .catch(function (e) { $(".st", pg).textContent = ""; toast(e.message, true); });
+    }
     $(".gourl", pg).addEventListener("click", function () {
       var url = $(".url", pg).value.trim();
       if (!/^https?:\/\//i.test(url)) return toast("Cole o link completo da lista (começando com http)", true);
-      var btn = $(".gourl", pg); btn.disabled = true; $(".st", pg).textContent = "Baixando a lista do link (pode levar alguns minutos)…"; $(".res", pg).innerHTML = "";
+      var btn = $(".gourl", pg); btn.disabled = true; $(".st", pg).textContent = "Lendo a lista (pode levar alguns minutos)…"; $(".res", pg).innerHTML = "";
       var info = null;
-      api("provider.url", { url: url }, true).then(function (r) {
+      api("provider.url", { url: url, max_connections: +$(".conns", pg).value || 1 }, true).then(function (r) {
         try { info = JSON.parse(decodeURIComponent(r.headers.get("x-bp-info") || "")); } catch (e) { info = null; }
         return r.text();
       }).then(function (text) {
         btn.disabled = false;
         var L = parseLink(url);
         curSrc = { account_id: null, source: (info && info.server_url) || (L ? L.server : "") };
-        if (info && info.created) toast("Acesso " + info.username + " cadastrado em Acessos do fornecedor. Ajuste lá o número de conexões dele.");
+        if (info && info.created) { toast("Lista " + info.username + " cadastrada."); loadSaved(); }
+        if (info && info.via === "api") toast("A lista veio pela API do fornecedor: canais e filmes (séries não vêm por este caminho).");
         gotList(text);
       }).catch(function (e) { btn.disabled = false; $(".st", pg).textContent = ""; toast(e.message, true); });
     });
     $(".clear", pg).addEventListener("click", function () {
-      confirmBox("Apagar catálogo atual", "Apaga todos os canais, filmes, séries e categorias importados. Clientes, revendedores e acessos do fornecedor continuam. Depois importe a lista nova.", "Apagar tudo", function () {
-        return api("catalog.clear").then(function () { toast("Catálogo apagado. Agora importe a lista do fornecedor novo."); });
+      confirmBox("Apagar todo o conteúdo", "Apaga todos os canais, filmes, séries e categorias salvos. Clientes, revendedores e listas cadastradas continuam. Depois salve o conteúdo da lista nova.", "Apagar tudo", function () {
+        return api("catalog.clear").then(function () { toast("Conteúdo apagado."); });
       });
     });
+    loadSaved();
     var curSrc = { account_id: null, source: "" }; // de qual fornecedor é a lista lida
     function gotList(text) {
       {
@@ -545,7 +573,7 @@
             return '<label><input type="checkbox" data-k="' + k + '" data-g="' + i + '"' + (adult ? "" : " checked") + "> " + esc(gname) + ' <span class="muted small">(' + g.items.length + ")" + (adult ? " · adulto" : "") + "</span></label>";
           }).join("") + "</div></div>";
       });
-      html += '<div class="box"><button class="btn p imp">Importar selecionados</button><div class="progress" style="margin-top:12px;display:none"><i></i></div><div class="ist muted small" style="margin-top:6px"></div></div>';
+      html += '<div class="box"><button class="btn p imp">Salvar selecionados</button><div class="progress" style="margin-top:12px;display:none"><i></i></div><div class="ist muted small" style="margin-top:6px"></div></div>';
       var res = $(".res", pg); res.innerHTML = html;
       $$("[data-all]", res).forEach(function (b) { b.addEventListener("click", function () { $$('[data-k="' + b.getAttribute("data-all") + '"]', res).forEach(function (c) { c.checked = true; }); }); });
       $$("[data-none]", res).forEach(function (b) { b.addEventListener("click", function () { $$('[data-k="' + b.getAttribute("data-none") + '"]', res).forEach(function (c) { c.checked = false; }); }); });
@@ -585,7 +613,7 @@
       var n = 0;
       (function next() {
         if (n >= batches.length) {
-          st.textContent = "Pronto! " + streams.length + " canais/filmes, " + seriesList.length + " séries e " + eps.length + " episódios importados."; btn.disabled = false; toast("Importação concluída"); return;
+          st.textContent = "Pronto! " + streams.length + " canais/filmes, " + seriesList.length + " séries e " + eps.length + " episódios salvos."; btn.disabled = false; toast("Conteúdo salvo"); return;
         }
         st.textContent = "Enviando lote " + (n + 1) + " de " + batches.length + "…";
         api("import.batch", Object.assign({}, batches[n], curSrc)).then(function () { n++; fill.style.width = Math.round(n / batches.length * 100) + "%"; next(); })
@@ -655,7 +683,7 @@
       api("catalog.list", Object.assign({ table: tbl, kind: kind }, st)).then(function (r) {
         rows = r.rows; upd();
         var cn = {}; cats.forEach(function (c) { cn[c.id] = c.name; });
-        if (!rows.length) { $(".tw", pg).innerHTML = '<div class="empty">Nada por aqui. Use "Importar do fornecedor" ou cadastre manualmente.</div>'; $(".pager", pg).innerHTML = ""; return; }
+        if (!rows.length) { $(".tw", pg).innerHTML = '<div class="empty">Nada por aqui. Use "Listas do fornecedor" ou cadastre manualmente.</div>'; $(".pager", pg).innerHTML = ""; return; }
         $(".tw", pg).innerHTML = '<table><thead><tr><th><input type="checkbox" class="chk all"></th><th></th><th>Nome</th><th>Categoria</th><th>Ordem</th><th>Status</th><th></th></tr></thead><tbody>' +
           rows.map(function (s, i) {
             return '<tr><td><input type="checkbox" class="chk ck" data-i="' + i + '"></td><td>' + (s.logo ? '<img class="thumb' + (live ? "" : " v") + '" loading="lazy" src="' + esc(s.logo) + '" onerror="this.style.visibility=\'hidden\'">' : "") +
@@ -924,10 +952,10 @@
 
   // ============================================================ rotas
   var ROUTES = {
-    inicio: viewInicio, clientes: viewClientes, revendedores: viewRevendedores, conta: viewConta, acessos: viewAcessos, importar: viewImportar,
+    inicio: viewInicio, clientes: viewClientes, revendedores: viewRevendedores, conta: viewConta, fornecedor: viewImportar, acessos: viewImportar, importar: viewImportar,
     canais: function () { viewStreams("live"); }, filmes: function () { viewStreams("movie"); }, series: viewSeries, categorias: viewCategorias, ajustes: viewAjustes,
   };
-  var ADMIN_ONLY = { revendedores: 1, acessos: 1, importar: 1, canais: 1, filmes: 1, series: 1, categorias: 1, ajustes: 1 };
+  var ADMIN_ONLY = { revendedores: 1, fornecedor: 1, acessos: 1, importar: 1, canais: 1, filmes: 1, series: 1, categorias: 1, ajustes: 1 };
 
   function render() {
     if (!S.session) return renderLogin();
